@@ -100,6 +100,11 @@ migration is a small example of the file shape.
 * **Email** (password resets, verification) needs an SMTP server. Configure
   it in Settings > Mail settings in the admin panel.
 * **File uploads** are stored on App storage next to the database.
+* **Sign-in attempts are rate limited per visitor** with PocketBase's
+  defaults: 2 sign-in attempts per 3 seconds, 300 API requests per 10
+  seconds. Change the limits in Settings > Application in the admin panel.
+  The visitor address comes from Dockhold's edge; the template is tuned for
+  it.
 
 Dockhold sets `PORT` and `DATA_DIR` itself. Do not add them.
 

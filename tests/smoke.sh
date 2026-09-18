@@ -125,11 +125,19 @@ response_header() {
     | tr -d '\r' | awk -v n="$name" 'BEGIN{IGNORECASE=1} tolower($1) == tolower(n":") {sub(/^[^:]*: */, ""); print; exit}'
 }
 
-# login EMAIL PASSWORD: prints a token, or nothing when login is refused.
+# login EMAIL PASSWORD [ADDRESS]: prints a token, or nothing when login is
+# refused. PocketBase counts sign-in attempts per visitor address (2 per 3
+# seconds by default) and, as shipped, reads that address from the
+# X-Forwarded-For header because Dockhold's edge sets it. There is no edge in
+# this test, so the header we send is the address. Each call here is a fresh
+# visitor so the lifecycle cases are not slowed down by the limit; the burst
+# case passes a fixed ADDRESS on purpose to hit it.
 login() {
+  local addr=${3:-"10.$((RANDOM % 256)).$((RANDOM % 256)).$((RANDOM % 254 + 1))"}
   http POST /api/collections/_superusers/auth-with-password \
-    "$(jq -cn --arg e "$1" --arg p "$2" '{identity:$e,password:$p}')" ""
+    "$(jq -cn --arg e "$1" --arg p "$2" '{identity:$e,password:$p}')" "" -H "X-Forwarded-For: $addr"
   if [ "$HTTP_CODE" = 200 ]; then printf '%s' "$HTTP_BODY" | jq -r '.token // empty'; fi
+  if [ "$HTTP_CODE" = 429 ]; then echo "  (login rate limited: see the note on login() in this script)" >&2; fi
 }
 
 superuser_count() { # TOKEN
@@ -214,8 +222,9 @@ expect_one_line_refusal "DATA_DIR read-only mount: one line, exit 1" "$STORAGE_L
 # ---------------------------------------------------------------------------
 echo "==== Secret refusals"
 D_SEC=$(new_datadir)
-secret_refusal() { # NAME MUST_CONTAIN MUST_NOT_CONTAIN [docker run args...]
-  local name=$1 must=$2 mustnot=$3
+SECRETS_FIX="Add PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD as secrets on this app's Variables tab and restart."
+secret_refusal() { # NAME EXPECTED_CLAUSE MUST_NOT_CONTAIN [docker run args...]
+  local name=$1 clause=$2 mustnot=$3
   shift 3
   start_app -e DATA_DIR=/data -v "$D_SEC:/data" "$@"
   local code ok=true log
@@ -223,16 +232,15 @@ secret_refusal() { # NAME MUST_CONTAIN MUST_NOT_CONTAIN [docker run args...]
   log=$(app_logs)
   [ "$code" = 1 ] || { ok=false; echo "  exit code: $code (want 1)"; }
   [ "$(printf '%s\n' "$log" | wc -l | tr -d ' ')" = 1 ] || { ok=false; echo "  more than one log line"; }
-  printf '%s' "$log" | grep -qF "$must" || { ok=false; echo "  log does not name $must"; }
-  printf '%s' "$log" | grep -qF "Variables tab" || { ok=false; echo "  log does not say where to fix it"; }
+  [ "$log" = "$clause $SECRETS_FIX" ] || { ok=false; echo "  log line differs from: $clause $SECRETS_FIX"; }
   if [ -n "$mustnot" ] && printf '%s' "$log" | grep -qF -- "$mustnot"; then ok=false; echo "  log contains a secret value"; fi
   if printf '%s' "$log" | grep -q "Server started"; then ok=false; echo "  listener opened"; fi
   if printf '%s' "$log" | grep -q pbinstall; then ok=false; echo "  installer link in the log"; fi
   report "$name" $ok
 }
-secret_refusal "PB_ADMIN_EMAIL missing: names it, exit 1, no value, no listener" PB_ADMIN_EMAIL "$PASS_1" -e "PB_ADMIN_PASSWORD=$PASS_1"
-secret_refusal "PB_ADMIN_PASSWORD empty: names it, exit 1, no value, no listener" PB_ADMIN_PASSWORD "$EMAIL_A" -e "PB_ADMIN_EMAIL=$EMAIL_A" -e PB_ADMIN_PASSWORD=
-secret_refusal "both secrets missing: names both, exit 1, no listener" "PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD" ""
+secret_refusal "PB_ADMIN_EMAIL missing: exact one-line refusal, exit 1, no value, no listener" "PB_ADMIN_EMAIL is missing or empty." "$PASS_1" -e "PB_ADMIN_PASSWORD=$PASS_1"
+secret_refusal "PB_ADMIN_PASSWORD empty: exact one-line refusal, exit 1, no value, no listener" "PB_ADMIN_PASSWORD is missing or empty." "$EMAIL_A" -e "PB_ADMIN_EMAIL=$EMAIL_A" -e PB_ADMIN_PASSWORD=
+secret_refusal "both secrets missing: exact one-line refusal naming both, exit 1, no listener" "PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD are missing or empty." ""
 
 # ---------------------------------------------------------------------------
 echo "==== First start"
@@ -271,6 +279,35 @@ ok=true
 report "first start: .dockhold/template marker, directory mode 700" $ok
 
 report "first start: default CORS answers any origin with *" "$([ "$(response_header /api/health Access-Control-Allow-Origin -H 'Origin: https://other.example')" = '*' ] && echo true || echo false)"
+
+http GET /api/settings "" "$TOK_A1"
+ok=true
+[ "$HTTP_CODE" = 200 ] || { ok=false; echo "  GET /api/settings returned $HTTP_CODE"; }
+[ "$(printf '%s' "$HTTP_BODY" | jq -r '.rateLimits.enabled')" = true ] || { ok=false; echo "  rateLimits.enabled is not true"; }
+[ "$(printf '%s' "$HTTP_BODY" | jq -c '.trustedProxy.headers')" = '["X-Forwarded-For"]' ] || { ok=false; echo "  trustedProxy.headers: $(printf '%s' "$HTTP_BODY" | jq -c '.trustedProxy.headers')"; }
+[ "$(printf '%s' "$HTTP_BODY" | jq -r '.trustedProxy.useLeftmostIP')" = false ] || { ok=false; echo "  trustedProxy.useLeftmostIP is not false"; }
+[ "$(printf '%s' "$HTTP_BODY" | jq -r '.rateLimits.rules | length')" = 4 ] || { ok=false; echo "  rate limit rules are not PocketBase's four defaults"; }
+report "first start: rate limits on with the default rules, forwarded address trusted (GET /api/settings)" $ok
+
+# Six wrong sign-ins from one fixed visitor address. The first must be an
+# ordinary refusal (wrong password), the limit must kick in before the sixth,
+# and reads must not be affected while it does.
+ok=true
+burst=""
+health_ok=true
+for i in 1 2 3 4 5 6; do
+  http POST /api/collections/_superusers/auth-with-password \
+    "$(jq -cn --arg e "$EMAIL_A" '{identity:$e,password:"wrong-password-1"}')" "" -H 'X-Forwarded-For: 198.51.100.7'
+  burst="$burst $HTTP_CODE"
+  [ "$i" = 1 ] && [ "$HTTP_CODE" != 400 ] && { ok=false; echo "  first wrong sign-in got $HTTP_CODE, want 400"; }
+  http GET /api/health "" ""
+  [ "$HTTP_CODE" = 200 ] || health_ok=false
+done
+printf '%s' "$burst" | grep -q 429 || { ok=false; echo "  no 429 in the burst:$burst"; }
+[ "$health_ok" = true ] || { ok=false; echo "  /api/health failed during the burst"; }
+http GET /api/collections/notes/records "" "" -H 'X-Forwarded-For: 198.51.100.7'
+[ "$HTTP_CODE" = 200 ] || { ok=false; echo "  a read from the limited address got $HTTP_CODE"; }
+report "first start: 6 wrong sign-ins from one address:$burst; /api/health 200 throughout, reads unaffected" $ok
 log_clean "first start" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------

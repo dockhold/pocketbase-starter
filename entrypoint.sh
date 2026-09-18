@@ -42,10 +42,12 @@ PB_DATA="$DATA_DIR/pb_data"
 # anyone who reaches the URL first could use, and this script never lets it
 # get that far. The values themselves are never printed.
 missing=""
+verb="is"
 [ -n "${PB_ADMIN_EMAIL:-}" ] || missing="PB_ADMIN_EMAIL"
 [ -n "${PB_ADMIN_PASSWORD:-}" ] || missing="${missing:+$missing and }PB_ADMIN_PASSWORD"
+[ -z "${PB_ADMIN_EMAIL:-}" ] && [ -z "${PB_ADMIN_PASSWORD:-}" ] && verb="are"
 if [ -n "$missing" ]; then
-  echo "$missing is missing or empty. Add PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD as secrets on this app's Variables tab and restart." >&2
+  echo "$missing $verb missing or empty. Add PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD as secrets on this app's Variables tab and restart." >&2
   exit 1
 fi
 
