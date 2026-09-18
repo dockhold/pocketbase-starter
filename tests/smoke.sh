@@ -23,7 +23,7 @@ PORT=8090
 URL="http://pb:$PORT"
 BASE=$(mktemp -d "${TMPDIR:-/tmp}/pbsmoke.XXXXXX")
 SEED_TITLE="Hello from Dockhold"
-STORAGE_LINE="This app keeps its data on App storage. Turn on App storage in the Size tab and redeploy."
+STORAGE_LINE="This app keeps its data on App storage. Turn on App storage in the Size tab; the app restarts on its own."
 HOOK_MARK="smoke-hook-loaded"
 
 PASS_COUNT=0

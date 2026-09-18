@@ -12,7 +12,7 @@ Template change, same day, same PocketBase version, no data migration:
 
 * Rate limits are on by default with PocketBase's default rules, and the
   visitor address is read from the header Dockhold's edge sets
-  (`pb_migrations/1789770000_security_settings.js`). Redeploy picks it up;
-  the migration runs once.
+  (`pb_migrations/1789770000_security_settings.js`). The migration runs
+  once, on the first start of an app built from this commit or later.
 * The start script passes the admin email and password after `--`, so a
   value starting with `-` is never read as an option.

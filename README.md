@@ -38,9 +38,10 @@ App storage is on the app's **Size** tab; secrets are attached on its
 
 **Run PocketBase.** Deploy this repository as it is. You get a hosted
 PocketBase with an admin panel, and you build your schema in that panel.
-**Redeploy** rebuilds from this repository's `main`, so you pick up starter
-updates when you choose to. `main` only moves for documented upgrades; see
-[CHANGELOG.md](CHANGELOG.md) and "Backups, upgrading, restoring" below.
+Your app stays on the version it was built with; **Restart** does not pull
+new code. To pick up a starter update, switch to the second path below.
+`main` only moves for documented upgrades; see [CHANGELOG.md](CHANGELOG.md)
+and "Backups, upgrading, restoring" below.
 
 **Develop your backend.** Click **Use this template** on GitHub to make your
 own copy, connect that repository in Dockhold, and deploy it. From then on
@@ -77,8 +78,8 @@ the secret under **Settings > Secrets** in Dockhold, then restart the app.
 
 **Sessions.** A password change signs out every existing admin session for
 that account, whether the change was made in Dockhold or inside
-PocketBase. So does a plain **Restart** or **Redeploy** with the password
-unchanged, because the start script re-saves the managed account each time.
+PocketBase. So does a plain **Restart** with the password unchanged,
+because the start script re-saves the managed account each time.
 Sign in again. Sessions of other superusers, and of your app's users, are not
 affected.
 
@@ -115,24 +116,25 @@ secrets. The easiest way to take one is Settings > Backups in the admin panel,
 which writes a zip you can download or send to S3. App storage is not a
 backup of itself: take one before you upgrade and on a schedule.
 
-**Upgrading.** Take a backup first. On the Run path, click **Redeploy** after
-this repository's `main` has moved; the [CHANGELOG](CHANGELOG.md) entry says
-whether the upgrade changes your data. On the Develop path, change both
-`PB_VERSION` and `PB_SHA256` in the `Dockerfile` (the sha256 is on the
-PocketBase release page in `checksums.txt`) and push. PocketBase is pre-1.0:
-upstream does not guarantee compatibility between releases, and some
-upgrades need manual migration steps. Read the release notes.
+**Upgrading.** Take a backup first. Upgrades happen on the Develop path:
+change both `PB_VERSION` and `PB_SHA256` in the `Dockerfile` (the sha256 is
+on the PocketBase release page in `checksums.txt`) and push, or merge this
+repository's `main` into your copy; the [CHANGELOG](CHANGELOG.md) entry says
+whether the upgrade changes your data. An app deployed on the Run path keeps
+the version it was built with; to upgrade it, make your own copy of this
+repository, connect it in Dockhold, and move the app's data with a backup
+and restore. PocketBase is pre-1.0: upstream does not guarantee
+compatibility between releases, and some upgrades need manual migration
+steps. Read the release notes.
 
 If the app comes back on the previous version after an upgrade (Dockhold
 rolls a deploy back when the new version does not become healthy), do not
 keep using it: an old version on data a newer version already changed is
 not safe. Restore the backup, then retry the upgrade.
 
-**Restoring.** Deploy the version the backup was taken with, then upload
-and restore the backup in Settings > Backups. On the Develop path you pin
-that version in the `Dockerfile`. The Run path always builds the current
-`main`, so to go back to an older version, switch to the Develop path and pin
-it there.
+**Restoring.** Deploy the version the backup was taken with (on the Develop
+path, pin that version in the `Dockerfile`), then upload and restore the
+backup in Settings > Backups.
 
 ## Limitations
 

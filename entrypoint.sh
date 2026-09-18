@@ -20,7 +20,7 @@ set -eu
 # a folder inside the image, on purpose: it would look like it works and lose
 # every record on the first restart.
 storage_missing() {
-  echo "This app keeps its data on App storage. Turn on App storage in the Size tab and redeploy." >&2
+  echo "This app keeps its data on App storage. Turn on App storage in the Size tab; the app restarts on its own." >&2
   exit 1
 }
 [ -n "${DATA_DIR:-}" ] || storage_missing
