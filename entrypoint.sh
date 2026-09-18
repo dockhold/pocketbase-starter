@@ -3,7 +3,7 @@
 #
 # Dockhold hands this app a port (PORT) and, when App storage is turned on, a
 # folder that survives restarts (DATA_DIR). The admin email and password come
-# from the Secrets tab as PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD. This script
+# from Dockhold's Secrets as PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD. This script
 # checks those, creates or updates the admin account, and then hands over to
 # PocketBase. It reads only PORT, DATA_DIR, PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD
 # and PB_ORIGINS, and it never prints a secret value.
@@ -45,17 +45,17 @@ missing=""
 [ -n "${PB_ADMIN_EMAIL:-}" ] || missing="PB_ADMIN_EMAIL"
 [ -n "${PB_ADMIN_PASSWORD:-}" ] || missing="${missing:+$missing and }PB_ADMIN_PASSWORD"
 if [ -n "$missing" ]; then
-  echo "$missing is missing or empty. Add PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD as secrets on this app's Secrets tab and restart." >&2
+  echo "$missing is missing or empty. Add PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD as secrets on this app's Variables tab and restart." >&2
   exit 1
 fi
 
 # 3. The admin account, before the listener.
 #
 # "upsert" creates the superuser when the email is new and sets its password
-# when it already exists. It runs on every start, so the values on the
-# Secrets tab are always the ones that work: change the password there and
+# when it already exists. It runs on every start, so the values stored in
+# Dockhold are always the ones that work: change the password there and
 # restart, and the new one works; change it inside PocketBase, and the next
-# restart puts the Secrets tab value back. A superuser with a different email
+# restart puts the Dockhold value back. A superuser with a different email
 # is never deleted here; remove old ones in Settings > Admins.
 #
 # The success line echoes the email, so stdout goes to /dev/null. On a bad

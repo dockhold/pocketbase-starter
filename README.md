@@ -13,15 +13,16 @@ the starting point for your own backend.
 
 1. Open the [Deploy link](https://app.dockhold.eu/new?repo=https://github.com/dockhold/pocketbase-starter&name=pocketbase)
    and sign in if asked.
-2. On the **Size** tab, turn on **App storage** (10 GB) and start at
-   **256 MB** of memory. The free plan is enough.
-3. On the **Secrets** tab, add two secrets and map them to the variable names
-   PocketBase expects. Give the entries names that belong to this app, for
-   example `pocketbase-admin-email` and `pocketbase-admin-password`, because
-   secrets are shared across your apps by name and two PocketBase apps that
-   share an entry would share a password.
+2. Under **App size**, keep **256 MB**. Under **App storage**, turn it on
+   and pick **10 GB**. The free plan is enough.
+3. Under **Environment**, in the **Secrets** list, click **New secret** twice
+   to store the two values, tick each one, and set its **Env var name** to
+   the name PocketBase expects. Give the entries names that belong to this
+   app, for example `pocketbase-admin-email` and `pocketbase-admin-password`,
+   because secrets are shared across your apps by name and two PocketBase
+   apps that share an entry would share a password.
 
-   | Secret entry (your name) | Variable name | Value |
+   | Secret (your name) | Env var name | Value |
    | --- | --- | --- |
    | `pocketbase-admin-email` | `PB_ADMIN_EMAIL` | The email you will sign in with |
    | `pocketbase-admin-password` | `PB_ADMIN_PASSWORD` | 8 to 71 characters |
@@ -29,8 +30,9 @@ the starting point for your own backend.
 4. Click **Deploy** and wait until the app shows as running.
 5. Open `https://<your app>/_/` and sign in with that email and password.
 
-If the app refuses to start, its page shows one line saying what is missing
-(App storage, or one of the two secrets). Fix it and click **Restart**.
+If the app refuses to start, its page shows one line saying what is missing.
+App storage is on the app's **Size** tab; secrets are attached on its
+**Variables** tab. Fix it and click **Restart**.
 
 ## Two ways to use it
 
@@ -61,19 +63,20 @@ change it. Now add a record in the admin panel and refresh the private window.
 
 The start script creates or updates one superuser from `PB_ADMIN_EMAIL` and
 `PB_ADMIN_PASSWORD` on every start, before PocketBase starts listening. The
-values on the Secrets tab are always the ones that work.
+values stored in Dockhold are always the ones that work. To change one, edit
+the secret under **Settings > Secrets** in Dockhold, then restart the app.
 
 | What you do | What happens |
 | --- | --- |
-| Change the password on the Secrets tab, then **Restart** | The new password works. |
-| Change the password inside PocketBase (Settings > Admins) | It works until the next restart, then the Secrets tab value is back. Change it on the Secrets tab instead. |
+| Change the password in Dockhold (Settings > Secrets), then **Restart** | The new password works. |
+| Change the password inside PocketBase (Settings > Admins) | It works until the next restart, then the Dockhold value is back. Change it in Dockhold instead. |
 | Change `PB_ADMIN_EMAIL`, then **Restart** | A second superuser is created. The old one stays until you remove it in Settings > Admins. |
 | Delete the managed admin inside PocketBase | It is recreated on the next restart. |
 | Create other superusers inside PocketBase | They are never touched. |
 | Set a value that PocketBase rejects (not an email, a password under 8 or over 71 characters) | The app refuses to start and its page says why. The previous login keeps working once you fix the value and restart. |
 
 **Sessions.** A password change signs out every existing admin session for
-that account, whether the change was made on the Secrets tab or inside
+that account, whether the change was made in Dockhold or inside
 PocketBase. So does a plain **Restart** or **Redeploy** with the password
 unchanged, because the start script re-saves the managed account each time.
 Sign in again. Sessions of other superusers, and of your app's users, are not

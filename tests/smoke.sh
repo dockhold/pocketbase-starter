@@ -193,7 +193,7 @@ secret_refusal() { # NAME MUST_CONTAIN MUST_NOT_CONTAIN [docker run args...]
   [ "$code" = 1 ] || { ok=false; echo "  exit code: $code (want 1)"; }
   [ "$(printf '%s\n' "$log" | wc -l | tr -d ' ')" = 1 ] || { ok=false; echo "  more than one log line"; }
   printf '%s' "$log" | grep -qF "$must" || { ok=false; echo "  log does not name $must"; }
-  printf '%s' "$log" | grep -qF "Secrets tab" || { ok=false; echo "  log does not say where to fix it"; }
+  printf '%s' "$log" | grep -qF "Variables tab" || { ok=false; echo "  log does not say where to fix it"; }
   if [ -n "$mustnot" ] && printf '%s' "$log" | grep -qF "$mustnot"; then ok=false; echo "  log contains a secret value"; fi
   if printf '%s' "$log" | grep -q "Server started"; then ok=false; echo "  listener opened"; fi
   report "$name" $ok
@@ -260,7 +260,7 @@ report "second start: migration did not re-run, exactly one seed record" $ok
 info "session after a plain restart with unchanged secrets: token from before the restart now gets $(token_works "$TOK_A1") (403 = signed out)"
 
 # ---------------------------------------------------------------------------
-echo "==== Password rotated on the Secrets tab"
+echo "==== Password rotated in Dockhold"
 stop_app
 start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_A" -e "PB_ADMIN_PASSWORD=$PASS_2"
 ok=true
@@ -284,9 +284,9 @@ info "session after a password change inside PocketBase: the token used for the 
 stop_app
 start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_A" -e "PB_ADMIN_PASSWORD=$PASS_2"
 wait_health || ok=false
-[ -n "$(login "$EMAIL_A" "$PASS_2")" ] || { ok=false; echo "  Secrets tab password does not log in after restart"; }
+[ -n "$(login "$EMAIL_A" "$PASS_2")" ] || { ok=false; echo "  the Dockhold password does not log in after restart"; }
 [ -z "$(login "$EMAIL_A" "$PASS_3")" ] || { ok=false; echo "  password changed inside PocketBase survived the restart"; }
-report "password changed inside PocketBase: reverted to the Secrets tab value on restart" $ok
+report "password changed inside PocketBase: reverted to the Dockhold value on restart" $ok
 
 # ---------------------------------------------------------------------------
 echo "==== PB_ADMIN_EMAIL changed"
