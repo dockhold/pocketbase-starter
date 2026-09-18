@@ -1,0 +1,61 @@
+name: Upstream release check
+# Once a week, compare the PocketBase version pinned in the Dockerfile with
+# the latest upstream release. When they differ, open one issue (or update
+# the open one) with the new version, its sha256, and the upgrade steps.
+# Digest pinning keeps rebuilds identical; this is what keeps the pin from
+# going stale unnoticed.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the pinned version with the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          pinned=$(sed -n 's/^ARG PB_VERSION=\([0-9][0-9.]*\)$/\1/p' Dockerfile | head -n 1)
+          [ -n "$pinned" ] || { echo "could not read PB_VERSION from the Dockerfile"; exit 1; }
+          latest=$(gh api repos/pocketbase/pocketbase/releases/latest --jq '.tag_name' | sed 's/^v//')
+          [ -n "$latest" ] || { echo "could not read the latest release"; exit 1; }
+          echo "pinned: $pinned, latest: $latest"
+          if [ "$pinned" = "$latest" ]; then
+            echo "up to date"
+            exit 0
+          fi
+          sha=$(curl -fsSL "https://github.com/pocketbase/pocketbase/releases/download/v${latest}/checksums.txt" \
+            | awk '$2 == "pocketbase_'"$latest"'_linux_amd64.zip" {print $1}')
+          title="Upstream release: PocketBase ${latest} (pinned ${pinned})"
+          body=$(cat <<BODY
+          PocketBase **v${latest}** is the latest release; this starter pins **${pinned}**.
+
+          Release notes: https://github.com/pocketbase/pocketbase/releases/tag/v${latest}
+
+          To upgrade:
+
+          1. Read the release notes. PocketBase is pre-1.0: look for breaking changes and manual migration steps.
+          2. In the Dockerfile set \`PB_VERSION=${latest}\` and \`PB_SHA256=${sha:-<linux_amd64 line of checksums.txt>}\`.
+          3. Push a branch; the Check workflow builds the image and runs the smoke test.
+          4. Test the upgrade on a populated install with a backup taken first.
+          5. Add a CHANGELOG entry that says whether the upgrade changes data, then merge.
+
+          This issue is updated by the weekly upstream check until the pin moves.
+          BODY
+          )
+          gh label create upstream --description "Upstream release moved" --color 0E8A16 --force >/dev/null 2>&1 || true
+          existing=$(gh issue list --state open --label upstream --search "Upstream release: PocketBase in:title" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+            echo "updated issue #$existing"
+          else
+            gh issue create --title "$title" --body "$body" --label upstream
+          fi

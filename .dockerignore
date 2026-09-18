@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!entrypoint.sh
+!pb_hooks/
+!pb_migrations/
+!pb_public/

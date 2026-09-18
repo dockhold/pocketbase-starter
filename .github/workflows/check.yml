@@ -1,0 +1,23 @@
+name: Check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t pocketbase-starter:test .
+      - name: Image size
+        # The README says the free plan is enough. Print the number that claim
+        # rests on. docker image inspect reports the uncompressed size; the
+        # gzip of a docker save is a close estimate of the compressed size a
+        # registry sees.
+        run: |
+          uncompressed=$(docker image inspect pocketbase-starter:test --format '{{.Size}}')
+          compressed=$(docker save pocketbase-starter:test | gzip -9 | wc -c)
+          echo "uncompressed: $((uncompressed / 1048576)) MiB ($uncompressed bytes)"
+          echo "compressed (docker save | gzip -9): $((compressed / 1048576)) MiB ($compressed bytes)"
+      - name: Smoke test
+        run: tests/smoke.sh pocketbase-starter:test
