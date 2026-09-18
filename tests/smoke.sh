@@ -24,6 +24,7 @@ URL="http://pb:$PORT"
 BASE=$(mktemp -d "${TMPDIR:-/tmp}/pbsmoke.XXXXXX")
 SEED_TITLE="Hello from Dockhold"
 STORAGE_LINE="This app keeps its data on App storage. Turn on App storage in the Size tab and redeploy."
+HOOK_MARK="smoke-hook-loaded"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -115,6 +116,15 @@ http() {
   fi
 }
 
+# response_header PATH HEADER-NAME [extra curl args...]: prints the header's
+# value, or nothing when the response does not carry it.
+response_header() {
+  local path=$1 name=$2
+  shift 2
+  docker exec "$CURL" curl -s -m 20 -o /dev/null -D - "$@" "$URL$path" 2>/dev/null \
+    | tr -d '\r' | awk -v n="$name" 'BEGIN{IGNORECASE=1} tolower($1) == tolower(n":") {sub(/^[^:]*: */, ""); print; exit}'
+}
+
 # login EMAIL PASSWORD: prints a token, or nothing when login is refused.
 login() {
   http POST /api/collections/_superusers/auth-with-password \
@@ -142,6 +152,21 @@ token_works() { # TOKEN -> prints the status of a protected listing
   printf '%s' "$HTTP_CODE"
 }
 
+# log_clean NAME VALUE...: after a start, the log must not contain the
+# installer link (the window a stranger could use) nor any bound value.
+# Called after every start with every secret value in play at that point.
+log_clean() {
+  local name=$1 ok=true v log
+  shift
+  log=$(app_logs)
+  if printf '%s' "$log" | grep -q pbinstall; then ok=false; echo "  installer link in the log"; fi
+  for v in "$@"; do
+    [ -n "$v" ] || continue
+    if printf '%s' "$log" | grep -qF -- "$v"; then ok=false; echo "  log contains a bound value"; fi
+  done
+  report "$name: no installer link, no bound value in the log" $ok
+}
+
 # A refused-start case: the container must exit 1 with exactly one log line.
 expect_one_line_refusal() { # NAME EXPECTED_LINE [docker run args...]
   local name=$1 expected=$2
@@ -166,10 +191,16 @@ info "pinned PocketBase version: $PB_VERSION"
 
 EMAIL_A="owner-$(rand_hex 4)@example.com"
 EMAIL_B="second-$(rand_hex 4)@example.com"
+EMAIL_C="byhand-$(rand_hex 4)@example.com"
+EMAIL_DASH="-dash-$(rand_hex 4)@example.com"
 PASS_1="pw1-$(rand_hex 8)"
 PASS_2="pw2-$(rand_hex 8)"
 PASS_3="pw3-$(rand_hex 8)"
+PASS_C="pwc-$(rand_hex 8)"
+PASS_DASH2="--Dashpass12345"
+PASS_DASH1="-Dashpass12345"
 SECRETS_A=(-e "PB_ADMIN_EMAIL=$EMAIL_A" -e "PB_ADMIN_PASSWORD=$PASS_1")
+ALL_VALUES=("$EMAIL_A" "$EMAIL_B" "$EMAIL_C" "$EMAIL_DASH" "$PASS_1" "$PASS_2" "$PASS_3" "$PASS_C" "Dashpass12345")
 
 # ---------------------------------------------------------------------------
 echo "==== Storage refusals"
@@ -194,8 +225,9 @@ secret_refusal() { # NAME MUST_CONTAIN MUST_NOT_CONTAIN [docker run args...]
   [ "$(printf '%s\n' "$log" | wc -l | tr -d ' ')" = 1 ] || { ok=false; echo "  more than one log line"; }
   printf '%s' "$log" | grep -qF "$must" || { ok=false; echo "  log does not name $must"; }
   printf '%s' "$log" | grep -qF "Variables tab" || { ok=false; echo "  log does not say where to fix it"; }
-  if [ -n "$mustnot" ] && printf '%s' "$log" | grep -qF "$mustnot"; then ok=false; echo "  log contains a secret value"; fi
+  if [ -n "$mustnot" ] && printf '%s' "$log" | grep -qF -- "$mustnot"; then ok=false; echo "  log contains a secret value"; fi
   if printf '%s' "$log" | grep -q "Server started"; then ok=false; echo "  listener opened"; fi
+  if printf '%s' "$log" | grep -q pbinstall; then ok=false; echo "  installer link in the log"; fi
   report "$name" $ok
 }
 secret_refusal "PB_ADMIN_EMAIL missing: names it, exit 1, no value, no listener" PB_ADMIN_EMAIL "$PASS_1" -e "PB_ADMIN_PASSWORD=$PASS_1"
@@ -238,10 +270,8 @@ ok=true
 [ "$(docker exec "$APP" cat /data/.dockhold/template 2>/dev/null)" = "pocketbase-starter $PB_VERSION" ] || { ok=false; echo "  marker content: $(docker exec "$APP" cat /data/.dockhold/template 2>&1)"; }
 report "first start: .dockhold/template marker, directory mode 700" $ok
 
-ok=true
-if app_logs | grep -qF "$EMAIL_A"; then ok=false; echo "  log echoes the admin email"; fi
-if app_logs | grep -qF "$PASS_1"; then ok=false; echo "  log echoes the admin password"; fi
-report "first start: log never echoes the bound values" $ok
+report "first start: default CORS answers any origin with *" "$([ "$(response_header /api/health Access-Control-Allow-Origin -H 'Origin: https://other.example')" = '*' ] && echo true || echo false)"
+log_clean "first start" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== Second start on the same storage"
@@ -257,7 +287,8 @@ ok=true
 [ "$(notes_total)" = 1 ] || ok=false
 [ "$(seed_count)" = 1 ] || ok=false
 report "second start: migration did not re-run, exactly one seed record" $ok
-info "session after a plain restart with unchanged secrets: token from before the restart now gets $(token_works "$TOK_A1") (403 = signed out)"
+report "second start: a plain restart with the same password signs out the managed admin's earlier session (403)" "$([ "$(token_works "$TOK_A1")" = 403 ] && echo true || echo false)"
+log_clean "second start" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== Password rotated in Dockhold"
@@ -269,7 +300,8 @@ TOK_A3=$(login "$EMAIL_A" "$PASS_2")
 [ -n "$TOK_A3" ] || { ok=false; echo "  new password refused"; }
 [ -z "$(login "$EMAIL_A" "$PASS_1")" ] || { ok=false; echo "  old password still accepted"; }
 report "password rotated: new password logs in, old does not" $ok
-info "session after a password rotation: token from before now gets $(token_works "$TOK_A2") (403 = signed out)"
+report "password rotated: the session from before the rotation is signed out (403)" "$([ "$(token_works "$TOK_A2")" = 403 ] && echo true || echo false)"
+log_clean "password rotated" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== Password changed inside PocketBase"
@@ -280,13 +312,16 @@ http PATCH "/api/collections/_superusers/records/$ID_A" \
 ok=true
 [ "$HTTP_CODE" = 200 ] || { ok=false; echo "  PATCH returned $HTTP_CODE"; }
 [ -n "$(login "$EMAIL_A" "$PASS_3")" ] || { ok=false; echo "  control failed: changed password does not log in"; }
-info "session after a password change inside PocketBase: the token used for the change now gets $(token_works "$TOK_A3") (403 = signed out)"
+report "password changed inside PocketBase: the change is accepted (control)" $ok
+report "password changed inside PocketBase: the session used for the change is signed out at once (403)" "$([ "$(token_works "$TOK_A3")" = 403 ] && echo true || echo false)"
+ok=true
 stop_app
 start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_A" -e "PB_ADMIN_PASSWORD=$PASS_2"
 wait_health || ok=false
 [ -n "$(login "$EMAIL_A" "$PASS_2")" ] || { ok=false; echo "  the Dockhold password does not log in after restart"; }
 [ -z "$(login "$EMAIL_A" "$PASS_3")" ] || { ok=false; echo "  password changed inside PocketBase survived the restart"; }
 report "password changed inside PocketBase: reverted to the Dockhold value on restart" $ok
+log_clean "password reverted" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== PB_ADMIN_EMAIL changed"
@@ -299,6 +334,7 @@ TOK_B=$(login "$EMAIL_B" "$PASS_2")
 [ "$(superuser_count "$TOK_B")" = 2 ] || { ok=false; echo "  superuser count: $(superuser_count "$TOK_B") (want 2)"; }
 [ -n "$(login "$EMAIL_A" "$PASS_2")" ] || { ok=false; echo "  previous admin no longer logs in"; }
 report "email changed: two superusers, the previous one still logs in" $ok
+log_clean "email changed" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== Managed superuser deleted inside PocketBase"
@@ -316,6 +352,8 @@ TOK_B=$(login "$EMAIL_B" "$PASS_2")
 [ -n "$TOK_B" ] || { ok=false; echo "  managed admin not recreated"; }
 [ "$(superuser_count "$TOK_B")" = 2 ] || { ok=false; echo "  superuser count after recreate: $(superuser_count "$TOK_B") (want 2)"; }
 report "managed superuser deleted: recreated on restart, logs in" $ok
+report "managed superuser deleted: the previous admin's session survives that restart (200)" "$([ "$(token_works "$TOK_A4")" = 200 ] && echo true || echo false)"
+log_clean "managed superuser recreated" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== Invalid replacement credentials"
@@ -328,6 +366,7 @@ log=$(app_logs)
 printf '%s' "$log" | grep -qi "invalid email" || { ok=false; echo "  upstream reason missing"; }
 if printf '%s' "$log" | grep -qF "$PASS_2"; then ok=false; echo "  password echoed"; fi
 if printf '%s' "$log" | grep -q "Server started"; then ok=false; echo "  listener opened"; fi
+if printf '%s' "$log" | grep -q pbinstall; then ok=false; echo "  installer link in the log"; fi
 report "invalid email: exit 1 with upstream's reason, no value printed" $ok
 
 start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_B" -e "PB_ADMIN_PASSWORD=q7z"
@@ -339,6 +378,7 @@ printf '%s' "$log" | grep -qi "at least 8" || { ok=false; echo "  upstream reaso
 if printf '%s' "$log" | grep -qF "q7z"; then ok=false; echo "  password echoed"; fi
 if printf '%s' "$log" | grep -qF "$EMAIL_B"; then ok=false; echo "  email echoed"; fi
 if printf '%s' "$log" | grep -q "Server started"; then ok=false; echo "  listener opened"; fi
+if printf '%s' "$log" | grep -q pbinstall; then ok=false; echo "  installer link in the log"; fi
 report "3-character password: exit 1 with upstream's reason, no value printed" $ok
 
 start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_B" -e "PB_ADMIN_PASSWORD=$PASS_2"
@@ -347,6 +387,26 @@ wait_health || ok=false
 TOK_B=$(login "$EMAIL_B" "$PASS_2")
 [ -n "$TOK_B" ] || ok=false
 report "previous valid values restored: logs in again" $ok
+log_clean "previous valid values restored" "${ALL_VALUES[@]}"
+
+# ---------------------------------------------------------------------------
+echo "==== A superuser created by hand is untouched"
+http POST /api/collections/_superusers/records \
+  "$(jq -cn --arg e "$EMAIL_C" --arg p "$PASS_C" '{email:$e,password:$p,passwordConfirm:$p}')" "$TOK_B"
+ok=true
+[ "$HTTP_CODE" = 200 ] || { ok=false; echo "  creating a superuser with a token returned $HTTP_CODE"; }
+TOK_C=$(login "$EMAIL_C" "$PASS_C")
+[ -n "$TOK_C" ] || { ok=false; echo "  the hand-made superuser does not log in (control)"; }
+TOK_B_BEFORE=$(login "$EMAIL_B" "$PASS_2")
+stop_app
+start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_B" -e "PB_ADMIN_PASSWORD=$PASS_2"
+wait_health || ok=false
+[ -n "$(login "$EMAIL_C" "$PASS_C")" ] || { ok=false; echo "  the hand-made superuser cannot log in after the restart"; }
+[ "$(superuser_count "$TOK_C")" = 3 ] || { ok=false; echo "  superuser count $(superuser_count "$TOK_C") (want 3)"; }
+report "hand-made superuser: still there and logs in after a restart" $ok
+report "hand-made superuser: its session survives the managed admin's restart (200)" "$([ "$(token_works "$TOK_C")" = 200 ] && echo true || echo false)"
+report "hand-made superuser: the managed admin's own earlier session does not (403)" "$([ "$(token_works "$TOK_B_BEFORE")" = 403 ] && echo true || echo false)"
+log_clean "hand-made superuser" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== Forged proxy headers"
@@ -360,6 +420,20 @@ http POST /api/collections/_superusers/records \
 http POST /api/collections/notes/records '{"title":"forged"}' "" "${FORGED[@]}"
 [[ "$HTTP_CODE" =~ ^4 ]] || { ok=false; echo "  creating a note with forged headers returned $HTTP_CODE"; }
 report "forged X-Forwarded-* and Host headers confer nothing" $ok
+
+# ---------------------------------------------------------------------------
+echo "==== PB_ORIGINS"
+stop_app
+start_app -e DATA_DIR=/data -v "$D_MAIN:/data" -e "PB_ADMIN_EMAIL=$EMAIL_B" -e "PB_ADMIN_PASSWORD=$PASS_2" -e "PB_ORIGINS=https://example.com"
+ok=true
+wait_health || { ok=false; echo "  not healthy with PB_ORIGINS"; }
+allowed=$(response_header /api/health Access-Control-Allow-Origin -H 'Origin: https://example.com')
+other=$(response_header /api/health Access-Control-Allow-Origin -H 'Origin: https://other.example')
+[ "$allowed" = "https://example.com" ] || { ok=false; echo "  allowed origin got: '$allowed'"; }
+[ -z "$other" ] || { ok=false; echo "  other origin got: '$other'"; }
+report "PB_ORIGINS: the listed origin is echoed, another origin gets no CORS header" $ok
+TOK_B=$(login "$EMAIL_B" "$PASS_2")
+log_clean "PB_ORIGINS start" "${ALL_VALUES[@]}"
 
 # ---------------------------------------------------------------------------
 echo "==== 50 records with memory measurement"
@@ -421,6 +495,25 @@ TOTAL=$(printf '%s' "$HTTP_BODY" | jq -r '.totalItems')
 report "SIGKILL mid-write: healthy, all $ACKED acknowledged records present (total $TOTAL)" $ok
 TOK_B=$(login "$EMAIL_B" "$PASS_2")
 report "SIGKILL mid-write: admin still logs in" "$([ -n "$TOK_B" ] && echo true || echo false)"
+log_clean "after SIGKILL" "${ALL_VALUES[@]}"
+stop_app
+
+# ---------------------------------------------------------------------------
+echo "==== Values starting with a dash"
+D_DASH=$(new_datadir)
+dash_case() { # NAME EMAIL PASSWORD
+  local name=$1 email=$2 password=$3 ok=true tok
+  start_app -e DATA_DIR=/data -v "$D_DASH:/data" -e "PB_ADMIN_EMAIL=$email" -e "PB_ADMIN_PASSWORD=$password"
+  wait_health || { ok=false; echo "  not healthy (exit $(wait_exit))"; }
+  tok=$(login "$email" "$password")
+  [ -n "$tok" ] || { ok=false; echo "  does not log in"; }
+  report "$name: bootstraps and logs in" $ok
+  log_clean "$name" "${ALL_VALUES[@]}"
+  stop_app
+}
+dash_case "password starting with two dashes" "$EMAIL_B" "$PASS_DASH2"
+dash_case "password starting with one dash" "$EMAIL_B" "$PASS_DASH1"
+dash_case "email starting with a dash" "$EMAIL_DASH" "$PASS_2"
 
 # ---------------------------------------------------------------------------
 echo "==== Interrupted first start"
@@ -429,7 +522,13 @@ for delay in 0.15 0.5 1.0; do
   start_app -e DATA_DIR=/data -v "$D_INT:/data" "${SECRETS_A[@]}"
   sleep "$delay"
   docker kill -s KILL "$APP" >/dev/null 2>&1 || true
-  if app_logs | grep -q "Server started"; then phase="after the listener opened"; else phase="before the listener opened"; fi
+  ok=true
+  killed_log=$(app_logs)
+  if printf '%s' "$killed_log" | grep -q "Server started"; then phase="the listener had opened"; else phase="the listener had not opened"; fi
+  if printf '%s' "$killed_log" | grep -q pbinstall; then ok=false; echo "  installer link in the interrupted start's log"; fi
+  if printf '%s' "$killed_log" | grep -qF "$PASS_1"; then ok=false; echo "  password in the interrupted start's log"; fi
+  report "interrupted first start (KILL ${delay}s after start): no installer link in the killed run's log" $ok
+  info "interrupted first start (KILL ${delay}s after start): $phase before the kill"
   start_app -e DATA_DIR=/data -v "$D_INT:/data" "${SECRETS_A[@]}"
   ok=true
   wait_health || { ok=false; echo "  not healthy after interrupted first start"; }
@@ -437,9 +536,40 @@ for delay in 0.15 0.5 1.0; do
   [ -n "$TOK_I" ] || { ok=false; echo "  admin does not log in"; }
   [ "$(superuser_count "$TOK_I")" = 1 ] || { ok=false; echo "  superuser count $(superuser_count "$TOK_I") (want 1)"; }
   [ "$(seed_count)" = 1 ] || { ok=false; echo "  seed count $(seed_count) (want 1)"; }
-  report "interrupted first start (KILL at ${delay}s, $phase): healthy, one superuser, one seed" $ok
+  report "interrupted first start (KILL ${delay}s after start): next start healthy, one superuser, one seed" $ok
+  log_clean "interrupted first start (KILL ${delay}s after start), next start" "${ALL_VALUES[@]}"
   stop_app
 done
+
+# ---------------------------------------------------------------------------
+echo "==== Hooks come from the image, never from App storage"
+HOOK_DIR=$(mktemp -d "$BASE/hooks.XXXXXX")
+chmod 0755 "$HOOK_DIR"
+cat >"$HOOK_DIR/main.pb.js" <<EOF
+onBootstrap((e) => {
+  e.next()
+  console.log("$HOOK_MARK")
+})
+EOF
+chmod 0644 "$HOOK_DIR/main.pb.js"
+# Positive control: the same hook file in the image's hooks folder runs.
+D_HOOK_P=$(new_datadir)
+start_app -e DATA_DIR=/data -v "$D_HOOK_P:/data" -v "$HOOK_DIR:/app/pb_hooks:ro" "${SECRETS_A[@]}"
+ok=true
+wait_health || { ok=false; echo "  not healthy with a hook mounted"; }
+app_logs | grep -qF "$HOOK_MARK" || { ok=false; echo "  hook in /app/pb_hooks did not run"; }
+report "hooks: a hook file in the image's pb_hooks runs (control)" $ok
+stop_app
+# Negative: the identical file under DATA_DIR/pb_hooks is ignored.
+D_HOOK_N=$(new_datadir)
+docker run --rm -v "$D_HOOK_N:/data" -v "$HOOK_DIR:/h:ro" "$HELPER_IMAGE" \
+  sh -c 'mkdir -p /data/pb_hooks && cp /h/main.pb.js /data/pb_hooks/ && chown -R 1001:1001 /data/pb_hooks' >/dev/null
+start_app -e DATA_DIR=/data -v "$D_HOOK_N:/data" "${SECRETS_A[@]}"
+ok=true
+wait_health || { ok=false; echo "  not healthy with a hook on storage"; }
+if app_logs | grep -qF "$HOOK_MARK"; then ok=false; echo "  hook under DATA_DIR/pb_hooks ran"; fi
+report "hooks: the same file under DATA_DIR/pb_hooks does not run" $ok
+stop_app
 
 # ---------------------------------------------------------------------------
 echo "==== Disk full (3 MB tmpfs as App storage, owned root:1001 mode 2770)"
@@ -519,6 +649,7 @@ GOT=$(notes_total)
 http POST /api/collections/notes/records '{"title":"after move"}' "$(login "$EMAIL_B" "$PASS_2")"
 [ "$HTTP_CODE" = 200 ] || { ok=false; echo "  create after move returned $HTTP_CODE"; }
 report "disk full: same files on a bigger mount, healthy, $GOT records intact, writes work" $ok
+log_clean "disk full, bigger mount" "${ALL_VALUES[@]}"
 stop_app
 
 # ---------------------------------------------------------------------------

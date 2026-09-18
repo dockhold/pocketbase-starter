@@ -63,11 +63,16 @@ fi
 # PocketBase says why on stderr and the script stops here with exit code 1.
 # The same folders are passed as for the server below, so PocketBase looks
 # in exactly one place for hooks and migrations in both steps.
-/app/pocketbase superuser upsert "$PB_ADMIN_EMAIL" "$PB_ADMIN_PASSWORD" \
+#
+# Every flag comes first and "--" ends the flags, so an email or password
+# that starts with "-" is taken as a value and never as an option. Without
+# it a password like "--dir" would be read as a flag.
+/app/pocketbase superuser upsert \
   --dir "$PB_DATA" \
   --hooksDir /app/pb_hooks \
   --migrationsDir /app/pb_migrations \
   --automigrate=false \
+  -- "$PB_ADMIN_EMAIL" "$PB_ADMIN_PASSWORD" \
   >/dev/null
 
 # 4. Established-install marker.
