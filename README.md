@@ -7,11 +7,11 @@ and adds a start script that wires it to Dockhold's port, App storage, and
 your admin account. Nothing else is changed. Deploy it as it is, or use it as
 the starting point for your own backend.
 
-[![Deploy to Dockhold](https://img.shields.io/badge/Deploy%20to-Dockhold-2563eb?style=for-the-badge)](https://app.dockhold.eu/new?repo=https://github.com/dockhold/pocketbase-starter&name=pocketbase)
+[![Deploy on Dockhold](https://dockhold.eu/button.svg)](https://app.dockhold.eu/new?repo=https://github.com/dockhold/pocketbase-starter&name=pocketbase-starter&ref=button)
 
 ## Deploy
 
-1. Open the [Deploy link](https://app.dockhold.eu/new?repo=https://github.com/dockhold/pocketbase-starter&name=pocketbase)
+1. Open the [Deploy link](https://app.dockhold.eu/new?repo=https://github.com/dockhold/pocketbase-starter&name=pocketbase-starter&ref=button)
    and sign in if asked.
 2. Under **App size**, keep **256 MB**. Under **App storage**, turn it on
    and pick **10 GB**. The free plan is enough.
