@@ -65,11 +65,12 @@ change it. Now add a record in the admin panel and refresh the private window.
 The start script creates or updates one superuser from `PB_ADMIN_EMAIL` and
 `PB_ADMIN_PASSWORD` on every start, before PocketBase starts listening. The
 values stored in Dockhold are always the ones that work. To change one, edit
-the secret under **Settings > Secrets** in Dockhold, then restart the app.
+the secret under **Secrets** in the Dockhold dashboard sidebar, then restart
+the app.
 
 | What you do | What happens |
 | --- | --- |
-| Change the password in Dockhold (Settings > Secrets), then **Restart** | The new password works. |
+| Change the password in Dockhold (**Secrets** in the dashboard sidebar), then **Restart** | The new password works. |
 | Change the password inside PocketBase (Settings > Admins) | It works until the next restart, then the Dockhold value is back. Change it in Dockhold instead. |
 | Change `PB_ADMIN_EMAIL`, then **Restart** | A second superuser is created. The old one stays until you remove it in Settings > Admins. |
 | Delete the managed admin inside PocketBase | It is recreated on the next restart. |
