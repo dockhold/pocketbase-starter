@@ -2,9 +2,11 @@
 # Smoke test for the pocketbase-starter image, run the way Dockhold runs it:
 # user 1001, every capability dropped, no privilege escalation, 256 MB of
 # memory and no swap, App storage mounted at /data owned root:1001 with mode
-# 2770, a fixed PORT, generated secrets, and no outbound network. Every
-# assertion goes through PocketBase's own API from a curl helper on the same
-# isolated network. Nothing upstream is mocked.
+# 2770, a fixed PORT and generated secrets. One restriction goes further than
+# Dockhold does: there is no outbound network, which proves the app never
+# downloads anything at runtime. Every assertion goes through PocketBase's own
+# API from a curl helper on the same isolated network. Nothing upstream is
+# mocked.
 #
 # Usage: tests/smoke.sh <image>
 # Needs: docker, jq, bash 4 or newer. Exits non-zero if any case fails.
